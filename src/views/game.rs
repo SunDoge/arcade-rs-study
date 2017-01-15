@@ -85,7 +85,25 @@ impl Ship {
                     angular_vel: angular_vel,
                     total_time: 0.0,
                 }),
-            ]
+            ],
+            CannonType::DivergentBullet { a, b } => vec![
+                // If a,b > 0, eventually goes upwards
+                Box::new(DivergentBullet {
+                    pos_x: cannons_x,
+                    origin_y: cannon1_y,
+                    a: -a,
+                    b: b,
+                    total_time: 0.0,
+                }),
+                // If a,b > 0, eventually goes downwards
+                Box::new(DivergentBullet {
+                    pos_x: cannons_x,
+                    origin_y: cannon2_y,
+                    a: a,
+                    b: b,
+                    total_time: 0.0,
+                }),
+            ]       
         }
 
     }
@@ -146,7 +164,7 @@ impl ShipView {
 
 impl View for ShipView {
     fn render(&mut self, phi: &mut Phi, elapsed: f64) -> ViewAction {
-        if phi.events.now.quit || phi.events.now.key_escape == Some(true) {
+        if phi.events.now.quit {
             return ViewAction::Quit;
         }
 
@@ -246,7 +264,10 @@ impl View for ShipView {
         }
 
         if phi.events.now.key_3 == Some(true) {
-            // TODO
+            self.player.cannon = CannonType::DivergentBullet {
+                a: 100.0,
+                b: 1.2,
+            }
         }
 
         phi.renderer.copy_sprite(
@@ -344,6 +365,13 @@ impl Asteroid {
     }
 }
 
+trait Bullet {
+     fn update(self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>>;
+     fn render(&self, phi: &mut Phi);
+     fn rect(&self) -> Rectangle;
+}
+
+
 #[derive(Clone, Copy)]
 struct RectBullet {
     rect: Rectangle
@@ -371,11 +399,6 @@ impl RectBullet {
     }
 }
 
-trait Bullet {
-     fn update(self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>>;
-     fn render(&self, phi: &mut Phi);
-     fn rect(&self) -> Rectangle;
-}
 
 impl Bullet for RectBullet {
     fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
@@ -405,6 +428,10 @@ enum CannonType {
     SineBullet {
         amplitude: f64,
         angular_vel: f64
+    },
+    DivergentBullet {
+        a: f64,
+        b: f64
     }
 }
 
@@ -443,6 +470,51 @@ impl Bullet for SineBullet {
     fn rect(&self) -> Rectangle {
         //? Just the general form of the sine function, minus the initial time.
         let dy = self.amplitude * f64::sin(self.angular_vel * self.total_time);
+        Rectangle {
+            x: self.pos_x,
+            y: self.origin_y + dy,
+            w: BULLET_W,
+            h: BULLET_H,
+        }
+    }
+}
+
+struct DivergentBullet {
+    pos_x: f64,
+    origin_y: f64,
+    a: f64, // Influences the bump's height
+    b: f64, // Influences the bump's width
+    total_time: f64,
+}
+
+impl Bullet for DivergentBullet {
+    fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
+        self.total_time += dt;
+        self.pos_x += BULLET_SPEED * dt;
+
+        // If the bullet has left the screen, then delete it.
+        let (w, h) = phi.output_size();
+        let rect = self.rect();
+
+        if rect.x > w || rect.x < 0.0 ||
+           rect.y > h || rect.y < 0.0 {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    fn render(&self, phi: &mut Phi) {
+        // We will render this kind of bullet in yellow.
+        phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
+        phi.renderer.fill_rect(self.rect().to_sdl().unwrap());
+    }
+
+    fn rect(&self) -> Rectangle {
+        let dy = self.a *
+                    ((self.total_time / self.b).powi(3) -
+                     (self.total_time / self.b).powi(2));
+
         Rectangle {
             x: self.pos_x,
             y: self.origin_y + dy,
