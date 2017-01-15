@@ -3,7 +3,12 @@ mod events;
 pub mod data;
 pub mod gfx;
 
+use self::gfx::Sprite;
 use sdl2::render::Renderer;
+use sdl2::pixels::Color;
+use std::collections::HashMap;
+use std::path::Path;
+use sdl2_ttf::Sdl2TtfContext;
 
 struct_events! {
     keyboard: {
@@ -12,7 +17,8 @@ struct_events! {
         key_down: Down,
         key_left: Left,
         key_right: Right,
-        key_space: Space
+        key_space: Space,
+        key_enter: Enter
     },
     else: {
         quit: Quit { .. }
@@ -22,19 +28,46 @@ struct_events! {
 pub struct Phi<'window> {
     pub events: Events,
     pub renderer: Renderer<'window>,
+    pub ttf_context: &'window Sdl2TtfContext,
+    cached_fonts: HashMap<(&'static str, i32), ::sdl2_ttf::Font<'window>>,
 }
 
 impl<'window> Phi<'window> {
-    fn new(events: Events, renderer: Renderer<'window>) -> Phi<'window> {
+    fn new(events: Events, renderer: Renderer<'window>, ttf_context: &'window Sdl2TtfContext) -> Phi<'window> {
         Phi {
             events: events,
             renderer: renderer,
+            ttf_context: ttf_context,
+            cached_fonts: HashMap::new()
         }
     }
 
     pub fn output_size(&self) -> (f64, f64) {
         let (w, h) = self.renderer.output_size().unwrap();
         (w as f64, h as f64)
+    }
+
+    pub fn ttf_str_sprite(&mut self, text: &str, font_path: &'static str, size: i32, color: Color) -> Option<Sprite> {
+        //? First, we verify whether the font is already cached. If this is the
+        //? case, we use it to render the text.
+        if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
+            return font.render(text).blended(color).ok()
+                .and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok())
+                .map(Sprite::new)
+        }
+
+        //? Otherwise, we start by trying to load the requested font.
+        self.ttf_context.load_font(Path::new(font_path), size as u16).ok()
+            .and_then(|font| {
+                //? If this works, we cache the font we acquired.
+                self.cached_fonts.insert((font_path, size), font);
+                //? Then, we call the method recursively. Because we know that
+                //? the font has been cached, the `if` block will be executed
+                //? and the sprite will be appropriately rendered.
+                self.ttf_str_sprite(text, font_path, size, color)
+            })
+
+        // TODO
     }
 }
 
@@ -55,6 +88,7 @@ pub fn spawn<F>(title: &str, init: F)
     let video = sdl_context.video().unwrap();
     let mut timer = sdl_context.timer().unwrap();
     let _image_context = ::sdl2_image::init(::sdl2_image::INIT_PNG).unwrap();
+    let _ttf_context = ::sdl2_ttf::init().unwrap();
 
     // Create the window
     let window = video.window(title, 800, 600)
@@ -67,6 +101,7 @@ pub fn spawn<F>(title: &str, init: F)
         window.renderer()
             .accelerated()
             .build().unwrap(),
+        &_ttf_context
     );
 
     // Create the default view
