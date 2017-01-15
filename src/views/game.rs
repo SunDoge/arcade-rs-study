@@ -15,6 +15,10 @@ const ASTEROIDS_HIGH: usize = 7;
 const ASTEROIDS_TOTAL: usize = ASTEROIDS_WIDE * ASTEROIDS_HIGH - 4;
 const ASTEROID_SIDE: f64 = 96.0;
 
+const BULLET_SPEED: f64 = 240.0;
+const BULLET_W: f64 = 8.0;
+const BULLET_H: f64 = 4.0;
+
 const DEBUG: bool = false;
 
 #[derive(Clone, Copy)]
@@ -36,9 +40,37 @@ struct Ship {
     current: ShipFrame
 }
 
+impl Ship {
+    fn spawn_bullets(&self) -> Vec<RectBullet> {
+        let cannons_x = self.rect.x + 30.0;
+        let cannon1_y = self.rect.y + 6.0;
+        let cannon2_y = self.rect.y + SHIP_H - 10.0;
+
+        vec![
+            RectBullet {
+                rect: Rectangle {
+                    x: cannons_x,
+                    y: cannon1_y,
+                    w: BULLET_W,
+                    h: BULLET_H
+                }
+            },
+            RectBullet {
+                rect: Rectangle {
+                    x: cannons_x,
+                    y: cannon2_y,
+                    w: BULLET_W,
+                    h: BULLET_H
+                }
+            }
+        ]
+    }
+}
+
 pub struct ShipView {
     player: Ship,
     asteroid: Asteroid,
+    bullets: Vec<RectBullet>,
     bg: BgSet
 }
 
@@ -78,9 +110,13 @@ impl ShipView {
 
             asteroid: Asteroid::new(phi),
 
+            bullets: vec![],
+
             bg: bg,
         }
     }
+
+    
 }
 
 impl View for ShipView {
@@ -155,6 +191,8 @@ impl View for ShipView {
 
         self.asteroid.update(phi, elapsed);
 
+        self.bullets = self.bullets.iter().filter_map(|bullet| bullet.update(phi, elapsed)).collect();
+
         // Clear the screen
         phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
         phi.renderer.clear();
@@ -167,11 +205,19 @@ impl View for ShipView {
             phi.renderer.fill_rect(self.player.rect.to_sdl().unwrap());
         }
 
+        if phi.events.now.key_space == Some(true) {
+            self.bullets.append(&mut self.player.spawn_bullets());
+        }
+
         phi.renderer.copy_sprite(
             &self.player.sprites[self.player.current as usize],
             self.player.rect);
 
         self.asteroid.render(phi);
+
+        for bullet in &self.bullets {
+            bullet.render(phi);
+        }
 
         self.bg.front.render(&mut phi.renderer, elapsed);
 
@@ -255,5 +301,32 @@ impl Asteroid {
 
         // vel in [50.0, 150.0)
         self.vel = ::rand::random::<f64>().abs() * 100.0 + 50.0;
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RectBullet {
+    rect: Rectangle
+}
+
+impl RectBullet {
+    fn update(mut self, phi: &mut Phi, dt: f64) -> Option<Self> {
+        let (w, _) = phi.output_size();
+        self.rect.x += BULLET_SPEED * dt;
+
+        if self.rect.x > w {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    fn render(&self, phi: &mut Phi) {
+        phi.renderer.set_draw_color(Color::RGB(230,230,30));
+        phi.renderer.fill_rect(self.rect.to_sdl().unwrap());
+    }
+
+    fn rect(&self) -> Rectangle {
+        self.rect
     }
 }
