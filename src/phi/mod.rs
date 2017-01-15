@@ -18,7 +18,11 @@ struct_events! {
         key_left: Left,
         key_right: Right,
         key_space: Space,
-        key_enter: Enter
+        key_enter: Return,
+
+        key_1: Num1,
+        key_2: Num2,
+        key_3: Num3
     },
     else: {
         quit: Quit { .. }
@@ -150,3 +154,4 @@ pub fn spawn<F>(title: &str, init: F)
         }
     }
 }
+

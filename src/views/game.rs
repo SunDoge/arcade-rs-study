@@ -37,40 +37,64 @@ enum ShipFrame {
 struct Ship {
     rect: Rectangle,
     sprites: Vec<Sprite>,
-    current: ShipFrame
+    current: ShipFrame,
+    cannon: CannonType
 }
 
 impl Ship {
-    fn spawn_bullets(&self) -> Vec<RectBullet> {
+    fn spawn_bullets(&self) -> Vec<Box<Bullet>> {
         let cannons_x = self.rect.x + 30.0;
         let cannon1_y = self.rect.y + 6.0;
         let cannon2_y = self.rect.y + SHIP_H - 10.0;
 
-        vec![
-            RectBullet {
-                rect: Rectangle {
-                    x: cannons_x,
-                    y: cannon1_y,
-                    w: BULLET_W,
-                    h: BULLET_H
-                }
-            },
-            RectBullet {
-                rect: Rectangle {
-                    x: cannons_x,
-                    y: cannon2_y,
-                    w: BULLET_W,
-                    h: BULLET_H
-                }
-            }
-        ]
+        match self.cannon {
+            CannonType::RectBullet => vec![
+                Box::new(RectBullet {
+                    rect: Rectangle {
+                        x: cannons_x,
+                        y: cannon1_y,
+                        w: BULLET_W,
+                        h: BULLET_H
+                    }
+                }),
+                Box::new(RectBullet {
+                    rect: Rectangle {
+                        x: cannons_x,
+                        y: cannon2_y,
+                        w: BULLET_W,
+                        h: BULLET_H
+                    }
+                })
+            ],
+
+            CannonType::SineBullet {
+                amplitude,
+                angular_vel
+            } => vec![
+                Box::new(SineBullet {
+                    pos_x: cannons_x,
+                    origin_y: cannon1_y,
+                    amplitude: amplitude,
+                    angular_vel: angular_vel,
+                    total_time: 0.0,
+                }),
+                Box::new(SineBullet {
+                    pos_x: cannons_x,
+                    origin_y: cannon2_y,
+                    amplitude: amplitude,
+                    angular_vel: angular_vel,
+                    total_time: 0.0,
+                }),
+            ]
+        }
+
     }
 }
 
 pub struct ShipView {
     player: Ship,
     asteroid: Asteroid,
-    bullets: Vec<RectBullet>,
+    bullets: Vec<Box<Bullet>>,
     bg: BgSet
 }
 
@@ -106,6 +130,7 @@ impl ShipView {
                 },
                 sprites: sprites,
                 current: ShipFrame::MidNorm,
+                cannon: CannonType::RectBullet
             },
 
             asteroid: Asteroid::new(phi),
@@ -191,8 +216,12 @@ impl View for ShipView {
 
         self.asteroid.update(phi, elapsed);
 
-        self.bullets = self.bullets.iter().filter_map(|bullet| bullet.update(phi, elapsed)).collect();
+        let old_bullets = ::std::mem::replace(&mut self.bullets, vec![]);
+        self.bullets = old_bullets.into_iter().filter_map(|bullet| bullet.update(phi, elapsed)).collect();
 
+        if phi.events.now.key_space == Some(true) {
+            self.bullets.append(&mut self.player.spawn_bullets());
+        }
         // Clear the screen
         phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
         phi.renderer.clear();
@@ -205,8 +234,19 @@ impl View for ShipView {
             phi.renderer.fill_rect(self.player.rect.to_sdl().unwrap());
         }
 
-        if phi.events.now.key_space == Some(true) {
-            self.bullets.append(&mut self.player.spawn_bullets());
+        if phi.events.now.key_1 == Some(true) {
+            self.player.cannon = CannonType::RectBullet;
+        }
+
+        if phi.events.now.key_2 == Some(true) {
+            self.player.cannon = CannonType::SineBullet {
+                amplitude: 10.0,
+                angular_vel: 15.0
+            }
+        }
+
+        if phi.events.now.key_3 == Some(true) {
+            // TODO
         }
 
         phi.renderer.copy_sprite(
@@ -328,5 +368,86 @@ impl RectBullet {
 
     fn rect(&self) -> Rectangle {
         self.rect
+    }
+}
+
+trait Bullet {
+     fn update(self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>>;
+     fn render(&self, phi: &mut Phi);
+     fn rect(&self) -> Rectangle;
+}
+
+impl Bullet for RectBullet {
+    fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
+        let (w, _) = phi.output_size();
+        self.rect.x += BULLET_SPEED * dt;
+
+        if self.rect.x > w {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    fn render(&self, phi: &mut Phi) {
+        phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
+        phi.renderer.fill_rect(self.rect.to_sdl().unwrap());
+    }
+
+    fn rect(&self) -> Rectangle {
+        self.rect
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CannonType {
+    RectBullet,
+    SineBullet {
+        amplitude: f64,
+        angular_vel: f64
+    }
+}
+
+struct SineBullet {
+    pos_x: f64,
+    origin_y: f64,
+    amplitude: f64,
+    angular_vel: f64,
+    total_time: f64,
+}
+
+impl Bullet for SineBullet {
+    fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
+        //? We store the total time...
+        self.total_time += dt;
+
+        //? And move at the same speed as regular bullets.
+        self.pos_x += BULLET_SPEED * dt;
+
+        // If the bullet has left the screen, then delete it.
+        let (w, _) = phi.output_size();
+
+        if self.rect().x > w {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    fn render(&self, phi: &mut Phi) {
+        // We will render this kind of bullet in yellow.
+        phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
+        phi.renderer.fill_rect(self.rect().to_sdl().unwrap());
+    }
+
+    fn rect(&self) -> Rectangle {
+        //? Just the general form of the sine function, minus the initial time.
+        let dy = self.amplitude * f64::sin(self.angular_vel * self.total_time);
+        Rectangle {
+            x: self.pos_x,
+            y: self.origin_y + dy,
+            w: BULLET_W,
+            h: BULLET_H,
+        }
     }
 }
